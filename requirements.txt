@@ -1,0 +1,11 @@
+streamlit
+watchdog
+openai
+langchain
+langchain_openai
+langchain_community 
+faiss-cpu
+reportlab
+huggingface_hub
+pypdf2
+python-docx
