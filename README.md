@@ -11,7 +11,7 @@ python_version: 3.11
 suggested_hardware: "cpu-upgrade"
 ---
 
-# KaggleGPT: Datensatz-Empfehlungssystem mittels großer Sprachmodelle
+# KaggleGPT: A Multi-Criteria LLM-based Recommender System for Efficient Dataset Discovery in Machine Learning Projects
 
 ## Autoren:
 Nghia Duong-Trung
