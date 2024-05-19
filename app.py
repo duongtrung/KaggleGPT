@@ -1,39 +1,92 @@
-import os
+import time
+from dotenv import load_dotenv
 import streamlit as st
+from streamlit import session_state as ss
+from openai import OpenAI
+from streamlit_js_eval import streamlit_js_eval
+from utils import extract_text_from_pdf, prompt_template, download_conversation
 
-from langchain_openai import OpenAIEmbeddings
-from langchain_community.vectorstores import FAISS
-from langchain.chains.conversation.memory import ConversationBufferMemory
-from langchain_openai import ChatOpenAI
+# Load Environment Variables
+load_dotenv()
 
-from utils import get_llm_response, download_the_conversation,read_pdf,initial_response_query_and_answer,conversation_object
+# Initialize OpenAI Client
+client = OpenAI()
 
+# Initialsing Session Cariables
+if 'stream' not in ss:
+    ss.stream = None
 
-def vector_db_retriever():
-    embeddings = OpenAIEmbeddings()
-    vectordb = FAISS.load_local("vectorstore/db_faiss", embeddings,allow_dangerous_deserialization = True)
-    st.session_state.loaded_db = vectordb
-    retriever = vectordb.as_retriever(search_kwargs={"k": 12})
-    return retriever
+if "messages" not in ss:
+    ss.messages = []
 
-def sidebar_settings():
+if "is_pdf_file_uploaded" not in ss:
+    ss.is_pdf_file_uploaded = False 
+            
+if "uploaded_pdf_file" not in ss:
+    ss.uploaded_pdf_file = None
+ 
+if "is_initial_response_generated" not in ss:
+    ss.is_initial_response_generated = False
+           
+# Supporting Functions
+def data_streamer():
+    """
+    That stream object in ss.stream needs to be examined in detail to come
+    up with this solution. It is still in beta stage and may change in future releases.
+    """
+    for response in ss.stream:
+        if response.event == 'thread.message.delta':
+            value = response.data.delta.content[0].text.value
+            yield value
+            time.sleep(0.001)
+
+@st.cache_resource
+def vector_store_creation():
+    vector_store = client.beta.vector_stores.create(name="Kaggle Recommendation System")
+    file_paths = ["knowledge_base/kaggle_datasets.pdf"]
+    file_streams = [open(path, "rb") for path in file_paths]
+    client.beta.vector_stores.file_batches.upload_and_poll(vector_store_id=vector_store.id, files=file_streams)
+    return vector_store
+    
+@st.cache_resource
+def init_assistant(_vector_store,prompt_instructions):
+    """Define client and assistant"""
+      
+    assistant = client.beta.assistants.create(
+        name="Kaggle Dataset Recommedion System",
+        instructions=prompt_instructions,
+        tools=[{"type": "file_search"}],
+        model="gpt-4o",
+        tool_resources={"file_search": {"vector_store_ids": [_vector_store.id]}}
+    )
+    return client, assistant
+
+def upload_pdf_file():
+    with st.sidebar:    
+        with st.form("my-form"):
+            ss.uploaded_pdf_file = st.file_uploader("Laden Sie Ihr Projekt-Exposé hoch: ", type=["pdf"]) 
+            
+            submitted = st.form_submit_button("Holen Sie sich die von Kaggle empfohlenen Datensätze")
+
+        if submitted and ss.uploaded_pdf_file is not None:
+            st.success("Datei erfolgreich hochgeladen!")
+            ss.is_pdf_file_uploaded = True
+
+def create_new_session():
     with st.sidebar:   
-        if len(st.session_state.messages) >= 1:
-            if st.button("Konversation herunterladen"):
-                st.success("PDF erfolgreich erstellt! Klicken Sie auf die Schaltfläche unten, um es herunterzuladen.")
-                # Create PDF and get its filename
-                pdf_filename = download_the_conversation(st.session_state.messages)
-                # Provide the generated PDF for download
-                st.download_button(
-                label="Download PDF",
-                data=open(pdf_filename, 'rb').read(),
-                file_name="gesprach.pdf",
-                mime='application/pdf')   
+        with st.form("new_session_form"):
+            st.success(f"Datei bereits hochgeladen : {ss.uploaded_pdf_file.name}")
+            submitted = st.form_submit_button("Eine neue Sitzung erstellen.")
+        if submitted:
+            with st.spinner("Neue Sitzung wird erstellt...."):
+                ss.uploaded_pdf_file = None
+                ss.is_pdf_file_uploaded = False
+                ss.messages = []
+                ss.is_initial_response_generated = False
+                streamlit_js_eval(js_expressions="parent.window.location.reload()")
                 
-            if st.button("Neues Gespräch"):
-                st.session_state.messages = []   
-                st.session_state.uploaded_file = st.empty()
-                
+def display_app_instructions():
+    with st.sidebar:
         st.write("""
                  Hilfe zum System:
                  
@@ -42,134 +95,126 @@ def sidebar_settings():
                  - Reflektieren Sie Ihr Wissen auf 1-2 Seiten.
                  - Entwickeln Sie eine erste Idee für ein mögliches Thema und Forschungsfragen.
                  - Finden Sie geeignete Datensätze.
-                 """)       
+                 """) 
 
-def init_page():
+# Main function
+def main():
+    
+    st.set_page_config(page_title="KaggleGPT",page_icon='🤖',layout='centered',initial_sidebar_state='expanded')
     st.header("KaggleGPT German")
     st.subheader("Ein multi-kriterien LLM-basiertes Empfehlungssystem zur effizienten Untersuchung von Datensätzen in Projekten zum maschinellen Lernen")
-    st.sidebar.title("Benutzereinstellungen")
-        
-    # Initialize chat history
-    if "messages" not in st.session_state:
-        st.session_state.messages = []   
-        
-
-def upload_pdf_file():
-    with st.sidebar: 
-        if "is_pdf_file_uploaded" not in st.session_state:
-                st.session_state.is_pdf_file_uploaded = False
-                
-        with st.form("my-form"):
-            st.session_state.uploaded_file = st.file_uploader("Laden Sie Ihr Projekt-Exposé hoch: ", type=["pdf"]) 
-            
-            submitted = st.form_submit_button("Holen Sie sich die von Kaggle empfohlenen Datensätze")
-
-        if submitted and st.session_state.uploaded_file is not None:
-            st.success("Datei erfolgreich hochgeladen!")
-            st.session_state.is_pdf_file_uploaded = True
     
-            # do stuff with your uploaded file
-        return st.session_state.uploaded_file 
+    vector_store = vector_store_creation()
     
-def main():
-    st.set_page_config(
-                page_title="KaggleGPT",
-                page_icon='🤖',
-                layout='centered',
-                initial_sidebar_state='expanded'
-            )
-    #language = select_language()
-    init_page()
-    # with st.sidebar: 
-        # openai_api_key = st.text_input("OpenAI API Key", key="chatbot_api_key", type="password")
-        # os.environ["OPENAI_API_KEY"] = openai_api_key
+    with st.sidebar:
+        st.sidebar.title("Benutzereinstellungen") 
         
-    # if not openai_api_key:
-    #     st.info("Please add your OpenAI API key to continue.")
-    #     st.stop()
-    # else: 
-    with st.sidebar: 
         recommendation_engine = st.radio(
-            "Empfehlungsgebung: ",
+            "Empfehlungsgebung:",
             ('profilbasierte', 'expertenbasierte', 'wissensbasierte','multi-kriterienbasierte'))
-        st.session_state.recommendation_engine = recommendation_engine
+            
+        if recommendation_engine == 'profilbasierte':
+            st.write('Sie haben die profilbasierte Empfehlungsgebung gewählt.')
         
+        elif recommendation_engine == 'expertenbasierte':
+            st.write('Sie haben die expertenbasierte Empfehlungsgebung gewählt.')
         
-        
-    if recommendation_engine == 'profilbasierte':
-        st.write('Sie haben die profilbasierte Empfehlungsgebung gewählt.')
-              
-    elif recommendation_engine == 'expertenbasierte':
-        st.write('Sie haben die expertenbasierte Empfehlungsgebung gewählt.')
-    elif recommendation_engine == 'wissensbasierte':
-        st.write('Sie haben die wissensbasierte Empfehlungsgebung gewählt.')
+        elif recommendation_engine == 'wissensbasierte':
+            st.write('Sie haben die wissensbasierte Empfehlungsgebung gewählt.') 
+            
+        elif recommendation_engine == 'multi-kriterienbasierte':
+            st.write('Sie haben die multi-kriterienbasierte Empfehlungsgebung gewählt.')
+    
+    # Fetching the prompt template
+    prompt_instructions = prompt_template(recommendation_engine)
+    
+    if not ss.is_pdf_file_uploaded:  
+        upload_pdf_file()
     else:
-        st.write('Sie haben die multi-kriterienbasierte Empfehlungsgebung gewählt.')
-        
-    upload_pdf_file()
-    sidebar_settings() 
+        create_new_session()
     
-    if "retriever" not in st.session_state:
-        retriever = vector_db_retriever()
-        st.session_state.retriever = retriever
-        
-    if "memory" not in st.session_state:    
-        memory = ConversationBufferMemory(
-                memory_key="chat_history",
-                return_messages=True)
-        st.session_state.memory = memory 
-        
-    if "open_ai_llm" not in st.session_state:
-        llm = ChatOpenAI(model_name = "gpt-4", streaming=True)
-        st.session_state.open_ai_llm = llm   
+    # Initialize openai assistant
+    client, assistant = init_assistant(vector_store,prompt_instructions)
     
-    if "is_initial_response_generated" not in st.session_state:
-        st.session_state.is_initial_response_generated = False
+    # Display Messages
+    for message in ss.messages:
+        with st.chat_message(message["role"]):
+            st.markdown(message["content"])
+            
+    if len(ss.messages)  > 0:        
+        with st.sidebar:         
+            if st.button("Konversation herunterladen"):
+                st.success("PDF erfolgreich erstellt! Klicken Sie auf die Schaltfläche unten, um es herunterzuladen.")
+                # Create PDF and get its filename
+                pdf_filename = download_conversation(ss.messages)
+                # Provide the generated PDF for download
+                st.download_button(
+                    label="PDF herunterladen",
+                    data=open(pdf_filename, 'rb').read(),
+                    file_name=pdf_filename,
+                    mime='application/pdf') 
     
-    
-    if not st.session_state.is_initial_response_generated: 
-        
-        if st.session_state.is_pdf_file_uploaded:
+    # Display App Instructions
+    display_app_instructions()
+                   
+    # Reading PDF text and generate recommended Kaggle Datasets             
+    if not ss.is_initial_response_generated: 
+        if ss.is_pdf_file_uploaded:
             # INITIAL QUERY  
-            user_input_pdf_text = read_pdf(st.session_state.uploaded_file)
-            st.session_state.messages.append({"role": "user", "content": user_input_pdf_text})
-            
-            with st.spinner("Bitte warten....Empfehlungen für Kaggle-Datensätze abrufen..."):
-                try:
-                    # INITIAL RESPONSE
-                    response_from_llm = get_llm_response(user_input_pdf_text,st.session_state.open_ai_llm,st.session_state.retriever,st.session_state.memory,st.session_state.recommendation_engine)
-            
-                    st.session_state.response_from_llm = response_from_llm
-                    st.session_state.messages.append({"role": "assistant", "content": st.session_state.response_from_llm})  
-                    st.session_state.is_initial_response_generated = True        
-                    intial_response_query_response_text = initial_response_query_and_answer(user_input_pdf_text,response_from_llm,st.session_state.recommendation_engine)
-                    st.session_state.intial_response_query_response_text =  intial_response_query_response_text
-                except Exception as e:
-                    st.error("Seems there was an error with your OpenAI API Acess token key. Please enter the correct OpenAI Access key.")
-                    
-    if "conversation_object" not in st.session_state:
-        st.session_state.conversation_object = conversation_object(st.session_state.recommendation_engine)
-                    
-    if st.session_state.is_initial_response_generated:   
-        for message in st.session_state.messages:
-            with st.chat_message(message["role"]):
-                st.markdown(message["content"])                 
-                
-        user_query = st.chat_input("Stellen Sie mir eine Frage...")     
-        if user_query:
-            
-            # QUERY           
-            st.session_state.messages.append({"role": "user", "content": user_query})
-            with st.chat_message("user"):
-                st.markdown(user_query)
-            
-            #RESPONSE
-            with st.chat_message("assistant"):
-                with st.spinner("Antwort abrufen"):
-                    context = st.session_state.intial_response_query_response_text
-                    response_from_llm = st.session_state.conversation_object.predict(input=f"Context:\n {context} \n\n Query:\n{user_query}")
-                    st.markdown(response_from_llm)
-                    st.session_state.messages.append({"role": "assistant", "content": response_from_llm})          
+            with st.spinner("Datei wird gelesen...."):
+                user_input_pdf_text = extract_text_from_pdf(ss.uploaded_pdf_file)
+                ss.messages.append({"role": "user", "content": user_input_pdf_text})
+                with st.chat_message("user"):
+                    st.markdown(user_input_pdf_text)
         
-if __name__ == "__main__":
+            msg_history = [{"role": m["role"], "content": m["content"]} for m in ss.messages]
+            with st.spinner("Bitte warten....Empfehlungen für Kaggle-Datensätze abrufen......"):
+                try:
+                    ss.stream = client.beta.threads.create_and_run(
+                        assistant_id=assistant.id,        
+                        thread={
+                            "messages": msg_history
+                        },
+                        stream=True
+                    )
+                    with st.chat_message("assistant"):
+                        response = st.write_stream(data_streamer)
+                        ss.messages.append({"role": "assistant", "content": response}) 
+                        st.session_state.is_initial_response_generated = True        
+                except Exception as e:
+                    st.error("Es scheint ein Fehler mit Ihrem OpenAI API-Zugriffsschlüssel aufgetreten zu sein. Bitte geben Sie den korrekten OpenAI-Zugriffsschlüssel ein.")   
+        else:
+            st.info("Bitte laden Sie Ihr Thesendokument in die linke Seitenleiste hoch und klicken Sie auf die Schaltfläche 'Absenden'.")
+    
+    # Chat Section
+    if ss.is_initial_response_generated:
+        if prompt := st.chat_input("Stellen Sie mir eine Frage..."):
+            ss.messages.append({"role": "user", "content": prompt})
+            
+            # Prompt from User
+            with st.chat_message("user"):
+                st.markdown(prompt)
+            
+            msg_history = [{"role": m["role"], "content": m["content"]} for m in ss.messages]
+            
+            # Response from LLM
+            try:
+                with st.spinner("Antwort abrufen...."):
+                    ss.stream = client.beta.threads.create_and_run(
+                        assistant_id=assistant.id,        
+                        thread={
+                            "messages": msg_history
+                        },
+                        stream=True
+                    )
+                    
+                    with st.chat_message("assistant"):
+                        response = st.write_stream(data_streamer)
+                        ss.messages.append({"role": "assistant", "content": response})
+                        
+            except Exception as e:
+                st.error("Es scheint ein Problem beim Abrufen der Antwort aufgetreten zu sein. Bitte starten Sie die Sitzung neu.")
+
+            
+if __name__ == '__main__':
     main()

@@ -2,3 +2,5 @@ vectorstore/
 secrets.txt
 venv/
 research/
+.env
+archive_app/
