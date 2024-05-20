@@ -78,12 +78,7 @@ def create_new_session():
             st.success(f"Datei bereits hochgeladen : {ss.uploaded_pdf_file.name}")
             submitted = st.form_submit_button("Eine neue Sitzung erstellen.")
         if submitted:
-            with st.spinner("Neue Sitzung wird erstellt...."):
-                ss.uploaded_pdf_file = None
-                ss.is_pdf_file_uploaded = False
-                ss.messages = []
-                ss.is_initial_response_generated = False
-                streamlit_js_eval(js_expressions="parent.window.location.reload()")
+           streamlit_js_eval(js_expressions="parent.window.location.reload()")
                 
 def display_app_instructions():
     with st.sidebar:
