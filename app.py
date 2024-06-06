@@ -100,8 +100,7 @@ def main():
     vector_store = vector_store_creation()
     
     with st.sidebar:
-        st.sidebar.title("Benutzereinstellungen") 
-        
+        st.sidebar.header("Benutzereinstellungen") 
         recommendation_engine = st.radio(
             "Empfehlungsgebung:",
             ('profilbasierte', 'expertenbasierte', 'wissensbasierte','multi-kriterienbasierte'))
