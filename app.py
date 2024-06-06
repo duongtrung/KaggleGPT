@@ -81,16 +81,14 @@ def create_new_session():
            streamlit_js_eval(js_expressions="parent.window.location.reload()")
                 
 def display_app_instructions():
-    with st.sidebar:
-        st.write("""
-                 Hilfe zum System:
-                 
-                 Die Studierenden schreiben einen Entwurf für das Projektexposé.
-                 - Wählen Sie Themen und Interessen, die mit den Inhalten des Masterstudiengangs zusammenhängen.
-                 - Reflektieren Sie Ihr Wissen auf 1-2 Seiten.
-                 - Entwickeln Sie eine erste Idee für ein mögliches Thema und Forschungsfragen.
-                 - Finden Sie geeignete Datensätze.
-                 """) 
+    st.sidebar.info('Hilfe zum System::\n\n' + \
+    'Die Studierenden schreiben einen Entwurf für das Projektexposé.\n' + \
+    '- Wählen Sie Themen und Interessen, die mit den Inhalten des Masterstudiengangs zusammenhängen.\n' + \
+    '- Reflektieren Sie Ihr Wissen auf 1-2 Seiten.\n'  + \
+    '- Entwickeln Sie eine erste Idee für ein mögliches Thema und Forschungsfragen.\n' + \
+    '- Finden Sie geeignete Datensätze. \n'
+    '- Führe ein Gespräch mit KaggleGPT, um das Exposé zu verfeinern.'
+        )
 
 # Main function
 def main():
