@@ -7,3 +7,4 @@ python-dotenv
 streamlit_js_eval
 reportlab
 markdown2
+urllib3==1.26.16
